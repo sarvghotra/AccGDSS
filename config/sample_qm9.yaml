@@ -5,6 +5,7 @@ data:
 ckpt: gdss_qm9
 
 sampler:
+  dpm_solver: False
   predictor: Reverse
   corrector: Langevin
   snr: 0.2

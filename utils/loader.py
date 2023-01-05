@@ -7,7 +7,7 @@ from models.ScoreNetwork_X import ScoreNetworkX, ScoreNetworkX_GMH
 from sde import VPSDE, VESDE, subVPSDE
 
 from losses import get_sde_loss_fn
-from solver import get_pc_sampler, S4_solver
+from solver import get_dpm_solver, get_pc_sampler, S4_solver
 from evaluation.mmd import gaussian, gaussian_emd
 from utils.ema import ExponentialMovingAverage
 
@@ -54,13 +54,13 @@ def load_model_optimizer(params, config_train, device):
         if len(device) > 1:
             model = torch.nn.DataParallel(model, device_ids=device)
         model = model.to(f'cuda:{device[0]}')
-    
-    optimizer = torch.optim.Adam(model.parameters(), lr=config_train.lr, 
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=config_train.lr,
                                     weight_decay=config_train.weight_decay)
     scheduler = None
     if config_train.lr_schedule:
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=config_train.lr_decay)
-    
+
     return model, optimizer, scheduler
 
 
@@ -112,13 +112,37 @@ def load_loss_fn(config):
     reduce_mean = config.train.reduce_mean
     sde_x = load_sde(config.sde.x)
     sde_adj = load_sde(config.sde.adj)
-    
-    loss_fn = get_sde_loss_fn(sde_x, sde_adj, train=True, reduce_mean=reduce_mean, continuous=True, 
+
+    loss_fn = get_sde_loss_fn(sde_x, sde_adj, train=True, reduce_mean=reduce_mean, continuous=True,
                                 likelihood_weighting=False, eps=config.train.eps)
     return loss_fn
 
 
-def load_sampling_fn(config_train, config_module, config_sample, device):
+def load_dpm_solver_sampling_fn(config_train, config_module, config_sample, device, dpm_config, n_samples=10000):
+    sde_x = load_sde(config_train.sde.x)
+    sde_adj = load_sde(config_train.sde.adj)
+    max_node_num  = config_train.data.max_node_num
+
+    device_id = f'cuda:{device[0]}' if isinstance(device, list) else device
+
+    # if config_module.predictor == 'S4':
+    #     get_sampler = S4_solver
+    # else:
+    #     get_sampler = get_pc_sampler
+
+    if config_train.data.data in ['QM9', 'ZINC250k']:
+        shape_x = (n_samples, max_node_num, config_train.data.max_feat_num)
+        shape_adj = (n_samples, max_node_num, max_node_num)
+    else:
+        shape_x = (config_train.data.batch_size, max_node_num, config_train.data.max_feat_num)
+        shape_adj = (config_train.data.batch_size, max_node_num, max_node_num)
+
+    sampling_fn = get_dpm_solver(sde_x=sde_x, sde_adj=sde_adj, shape_x=shape_x, shape_adj=shape_adj,
+                                continuous=True, eps=config_sample.eps, device=device_id, dpm_config=dpm_config)
+    return sampling_fn
+
+
+def load_sampling_fn(config_train, config_module, config_sample, device, n_samples=10000):
     sde_x = load_sde(config_train.sde.x)
     sde_adj = load_sde(config_train.sde.adj)
     max_node_num  = config_train.data.max_node_num
@@ -131,18 +155,18 @@ def load_sampling_fn(config_train, config_module, config_sample, device):
         get_sampler = get_pc_sampler
 
     if config_train.data.data in ['QM9', 'ZINC250k']:
-        shape_x = (10000, max_node_num, config_train.data.max_feat_num)
-        shape_adj = (10000, max_node_num, max_node_num)
+        shape_x = (n_samples, max_node_num, config_train.data.max_feat_num)
+        shape_adj = (n_samples, max_node_num, max_node_num)
     else:
         shape_x = (config_train.data.batch_size, max_node_num, config_train.data.max_feat_num)
         shape_adj = (config_train.data.batch_size, max_node_num, max_node_num)
-        
-    sampling_fn = get_sampler(sde_x=sde_x, sde_adj=sde_adj, shape_x=shape_x, shape_adj=shape_adj, 
+
+    sampling_fn = get_sampler(sde_x=sde_x, sde_adj=sde_adj, shape_x=shape_x, shape_adj=shape_adj,
                                 predictor=config_module.predictor, corrector=config_module.corrector,
-                                snr=config_module.snr, scale_eps=config_module.scale_eps, 
-                                n_steps=config_module.n_steps, 
-                                probability_flow=config_sample.probability_flow, 
-                                continuous=True, denoise=config_sample.noise_removal, 
+                                snr=config_module.snr, scale_eps=config_module.scale_eps,
+                                n_steps=config_module.n_steps,
+                                probability_flow=config_sample.probability_flow,
+                                continuous=True, denoise=config_sample.noise_removal,
                                 eps=config_sample.eps, device=device_id)
     return sampling_fn
 
@@ -152,15 +176,15 @@ def load_model_params(config):
     max_feat_num = config.data.max_feat_num
 
     if 'GMH' in config_m.x:
-        params_x = {'model_type': config_m.x, 'max_feat_num': max_feat_num, 'depth': config_m.depth, 
+        params_x = {'model_type': config_m.x, 'max_feat_num': max_feat_num, 'depth': config_m.depth,
                     'nhid': config_m.nhid, 'num_linears': config_m.num_linears,
-                    'c_init': config_m.c_init, 'c_hid': config_m.c_hid, 'c_final': config_m.c_final, 
+                    'c_init': config_m.c_init, 'c_hid': config_m.c_hid, 'c_final': config_m.c_final,
                     'adim': config_m.adim, 'num_heads': config_m.num_heads, 'conv':config_m.conv}
     else:
         params_x = {'model_type':config_m.x, 'max_feat_num':max_feat_num, 'depth':config_m.depth, 'nhid':config_m.nhid}
-    params_adj = {'model_type':config_m.adj, 'max_feat_num':max_feat_num, 'max_node_num':config.data.max_node_num, 
-                    'nhid':config_m.nhid, 'num_layers':config_m.num_layers, 'num_linears':config_m.num_linears, 
-                    'c_init':config_m.c_init, 'c_hid':config_m.c_hid, 'c_final':config_m.c_final, 
+    params_adj = {'model_type':config_m.adj, 'max_feat_num':max_feat_num, 'max_node_num':config.data.max_node_num,
+                    'nhid':config_m.nhid, 'num_layers':config_m.num_layers, 'num_linears':config_m.num_linears,
+                    'c_init':config_m.c_init, 'c_hid':config_m.c_hid, 'c_final':config_m.c_final,
                     'adim':config_m.adim, 'num_heads':config_m.num_heads, 'conv':config_m.conv}
     return params_x, params_adj
 
@@ -170,7 +194,12 @@ def load_ckpt(config, device, ts=None, return_ckpt=False):
     ckpt_dict = {}
     if ts is not None:
         config.ckpt = ts
-    path = f'./checkpoints/{config.data.data}/{config.ckpt}.pth'
+
+    if config.get('train') and config.train.get('name') is not None:
+        path = f'./checkpoints/{config.data.data}/{config.train.name}/{config.ckpt}.pth'
+    else:
+        path = f'./checkpoints/{config.data.data}/{config.ckpt}.pth'
+
     ckpt = torch.load(path, map_location=device_id)
     print(f'{path} loaded')
     ckpt_dict= {'config': ckpt['model_config'], 'params_x': ckpt['params_x'], 'x_state_dict': ckpt['x_state_dict'],
@@ -198,9 +227,9 @@ def load_model_from_ckpt(params, state_dict, device):
 
 def load_eval_settings(data, orbit_on=True):
     # Settings for generic graph generation
-    methods = ['degree', 'cluster', 'orbit', 'spectral'] 
-    kernels = {'degree':gaussian_emd, 
-                'cluster':gaussian_emd, 
+    methods = ['degree', 'cluster', 'orbit', 'spectral']
+    kernels = {'degree':gaussian_emd,
+                'cluster':gaussian_emd,
                 'orbit':gaussian,
                 'spectral':gaussian_emd}
     return methods, kernels

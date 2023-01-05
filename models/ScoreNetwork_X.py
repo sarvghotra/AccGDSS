@@ -24,13 +24,13 @@ class ScoreNetworkX(torch.nn.Module):
                 self.layers.append(DenseGCNConv(self.nhid, self.nhid))
 
         self.fdim = self.nfeat + self.depth * self.nhid
-        self.final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=self.nfeat, 
+        self.final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=self.nfeat,
                             use_bn=False, activate_func=F.elu)
 
         self.activation = torch.tanh
 
     def forward(self, x, adj, flags):
-
+        # print('x in: ', x.shape)
         x_list = [x]
         for _ in range(self.depth):
             x = self.layers[_](x, adj)
@@ -42,6 +42,8 @@ class ScoreNetworkX(torch.nn.Module):
         x = self.final(xs).view(*out_shape)
 
         x = mask_x(x, flags)
+
+        # print('x out: ', x.shape)
 
         return x
 
@@ -57,17 +59,17 @@ class ScoreNetworkX_GMH(torch.nn.Module):
         self.layers = torch.nn.ModuleList()
         for _ in range(self.depth):
             if _ == 0:
-                self.layers.append(AttentionLayer(num_linears, max_feat_num, nhid, nhid, c_init, 
+                self.layers.append(AttentionLayer(num_linears, max_feat_num, nhid, nhid, c_init,
                                                   c_hid, num_heads, conv))
             elif _ == self.depth - 1:
-                self.layers.append(AttentionLayer(num_linears, nhid, adim, nhid, c_hid, 
+                self.layers.append(AttentionLayer(num_linears, nhid, adim, nhid, c_hid,
                                                   c_final, num_heads, conv))
             else:
-                self.layers.append(AttentionLayer(num_linears, nhid, adim, nhid, c_hid, 
+                self.layers.append(AttentionLayer(num_linears, nhid, adim, nhid, c_hid,
                                                   c_hid, num_heads, conv))
 
         fdim = max_feat_num + depth * nhid
-        self.final = MLP(num_layers=3, input_dim=fdim, hidden_dim=2*fdim, output_dim=max_feat_num, 
+        self.final = MLP(num_layers=3, input_dim=fdim, hidden_dim=2*fdim, output_dim=max_feat_num,
                          use_bn=False, activate_func=F.elu)
 
         self.activation = torch.tanh

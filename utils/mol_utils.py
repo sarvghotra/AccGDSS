@@ -5,6 +5,7 @@ import networkx as nx
 
 import re
 from rdkit import Chem, RDLogger
+from rdkit.Chem import Draw, AllChem
 RDLogger.DisableLog('rdApp.*')
 
 
@@ -32,22 +33,22 @@ def load_smiles(dataset='QM9'):
         col = 'smiles'
     else:
         raise ValueError('wrong dataset name in load_smiles')
-    
+
     df = pd.read_csv(f'data/{dataset.lower()}.csv')
 
     with open(f'data/valid_idx_{dataset.lower()}.json') as f:
         test_idx = json.load(f)
-    
+
     if dataset == 'QM9':
         test_idx = test_idx['valid_idxs']
         test_idx = [int(i) for i in test_idx]
-    
+
     train_idx = [i for i in range(len(df)) if i not in test_idx]
 
     return list(df[col].loc[train_idx]), list(df[col].loc[test_idx])
 
 
-def gen_mol(x, adj, dataset, largest_connected_comp=True):    
+def gen_mol(x, adj, dataset, largest_connected_comp=True):
     # x: 32, 9, 5; adj: 32, 4, 9, 9
     x = x.detach().cpu().numpy()
     adj = adj.detach().cpu().numpy()
@@ -172,12 +173,19 @@ def mols_to_nx(mols):
                     #    hybridization=atom.GetHybridization(),
                     #    num_explicit_hs=atom.GetNumExplicitHs(),
                     #    is_aromatic=atom.GetIsAromatic())
-                    
+
         for bond in mol.GetBonds():
             G.add_edge(bond.GetBeginAtomIdx(),
                        bond.GetEndAtomIdx(),
                        label=int(bond.GetBondTypeAsDouble()))
                     #    bond_type=bond.GetBondType())
-        
+
         nx_graphs.append(G)
     return nx_graphs
+
+
+def gen2dmol(mol, output_file):
+    mol = Chem.MolFromSmiles(mol)
+    AllChem.Compute2DCoords(mol)
+    Draw.MolToFile(mol, output_file)
+    return

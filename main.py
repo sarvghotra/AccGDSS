@@ -14,11 +14,12 @@ def main(work_type_args):
 
     # -------- Train --------
     if work_type_args.type == 'train':
-        trainer = Trainer(config) 
+        raise ValueError(f'Wrong type : {work_type_args.type}')
+        trainer = Trainer(config)
         ckpt = trainer.train(ts)
         if 'sample' in config.keys():
             config.ckpt = ckpt
-            sampler = Sampler(config) 
+            sampler = Sampler(config)
             sampler.sample()
 
     # -------- Generation --------
@@ -26,9 +27,16 @@ def main(work_type_args):
         if config.data.data in ['QM9', 'ZINC250k']:
             sampler = Sampler_mol(config)
         else:
-            sampler = Sampler(config) 
-        sampler.sample()
-        
+            sampler = Sampler(config)
+
+        if config.sampler.dpm_solver:
+            # FIXME: set n_samples to 1000(0)
+            assert config.sampler.dpm_config.steps is not None
+            sampler.dpm_solver_sampling(n_samples=64, diff_steps=config.sampler.dpm_config.steps)
+        else:
+            # FIXME: set n_samples to 1000(0)
+            sampler.sample(n_samples=64)
+
     else:
         raise ValueError(f'Wrong type : {work_type_args.type}')
 

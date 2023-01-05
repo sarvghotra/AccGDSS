@@ -18,13 +18,13 @@ class BaselineNetworkLayer(torch.nn.Module):
             self.convs.append(DenseGCNConv(conv_input_dim, conv_output_dim))
         self.hidden_dim = max(input_dim, output_dim)
         self.mlp_in_dim = input_dim + 2*conv_output_dim
-        self.mlp = MLP(num_linears, self.mlp_in_dim, self.hidden_dim, output_dim, 
+        self.mlp = MLP(num_linears, self.mlp_in_dim, self.hidden_dim, output_dim,
                             use_bn=False, activate_func=F.elu)
-        self.multi_channel = MLP(2, input_dim*conv_output_dim, self.hidden_dim, conv_output_dim, 
+        self.multi_channel = MLP(2, input_dim*conv_output_dim, self.hidden_dim, conv_output_dim,
                                     use_bn=False, activate_func=F.elu)
-        
+
     def forward(self, x, adj, flags):
-    
+
         x_list = []
         for _ in range(len(self.convs)):
             _x = self.convs[_](x, adj[:,_,:,:])
@@ -45,7 +45,7 @@ class BaselineNetworkLayer(torch.nn.Module):
 
 class BaselineNetwork(torch.nn.Module):
 
-    def __init__(self, max_feat_num, max_node_num, nhid, num_layers, num_linears, 
+    def __init__(self, max_feat_num, max_node_num, nhid, num_layers, num_linears,
                     c_init, c_hid, c_final, adim, num_heads=4, conv='GCN'):
 
         super(BaselineNetwork, self).__init__()
@@ -68,13 +68,13 @@ class BaselineNetwork(torch.nn.Module):
                 self.layers.append(BaselineNetworkLayer(self.num_linears, self.nhid, self.nhid, self.c_hid, self.c_final))
 
             else:
-                self.layers.append(BaselineNetworkLayer(self.num_linears, self.nhid, self.nhid, self.c_hid, self.c_hid)) 
+                self.layers.append(BaselineNetworkLayer(self.num_linears, self.nhid, self.nhid, self.c_hid, self.c_hid))
 
         self.fdim = self.c_hid*(self.num_layers-1) + self.c_final + self.c_init
-        self.final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=1, 
+        self.final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=1,
                             use_bn=False, activate_func=F.elu)
         self.mask = torch.ones([self.max_node_num, self.max_node_num]) - torch.eye(self.max_node_num)
-        self.mask.unsqueeze_(0)   
+        self.mask.unsqueeze_(0)
 
     def forward(self, x, adj, flags=None):
 
@@ -85,7 +85,7 @@ class BaselineNetwork(torch.nn.Module):
 
             x, adjc = self.layers[_](x, adjc, flags)
             adj_list.append(adjc)
-        
+
         adjs = torch.cat(adj_list, dim=1).permute(0,2,3,1)
         out_shape = adjs.shape[:-1] # B x N x N
         score = self.final(adjs).view(*out_shape)
@@ -100,12 +100,12 @@ class BaselineNetwork(torch.nn.Module):
 
 class ScoreNetworkA(BaselineNetwork):
 
-    def __init__(self, max_feat_num, max_node_num, nhid, num_layers, num_linears, 
+    def __init__(self, max_feat_num, max_node_num, nhid, num_layers, num_linears,
                     c_init, c_hid, c_final, adim, num_heads=4, conv='GCN'):
 
-        super(ScoreNetworkA, self).__init__(max_feat_num, max_node_num, nhid, num_layers, num_linears, 
+        super(ScoreNetworkA, self).__init__(max_feat_num, max_node_num, nhid, num_layers, num_linears,
                                             c_init, c_hid, c_final, adim, num_heads=4, conv='GCN')
-        
+
         self.adim = adim
         self.num_heads = num_heads
         self.conv = conv
@@ -113,23 +113,23 @@ class ScoreNetworkA(BaselineNetwork):
         self.layers = torch.nn.ModuleList()
         for _ in range(self.num_layers):
             if _==0:
-                self.layers.append(AttentionLayer(self.num_linears, self.nfeat, self.nhid, self.nhid, self.c_init, 
+                self.layers.append(AttentionLayer(self.num_linears, self.nfeat, self.nhid, self.nhid, self.c_init,
                                                     self.c_hid, self.num_heads, self.conv))
             elif _==self.num_layers-1:
-                self.layers.append(AttentionLayer(self.num_linears, self.nhid, self.adim, self.nhid, self.c_hid, 
+                self.layers.append(AttentionLayer(self.num_linears, self.nhid, self.adim, self.nhid, self.c_hid,
                                                     self.c_final, self.num_heads, self.conv))
             else:
-                self.layers.append(AttentionLayer(self.num_linears, self.nhid, self.adim, self.nhid, self.c_hid, 
+                self.layers.append(AttentionLayer(self.num_linears, self.nhid, self.adim, self.nhid, self.c_hid,
                                                     self.c_hid, self.num_heads, self.conv))
 
         self.fdim = self.c_hid*(self.num_layers-1) + self.c_final + self.c_init
-        self.final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=1, 
+        self.final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=1,
                             use_bn=False, activate_func=F.elu)
         self.mask = torch.ones([self.max_node_num, self.max_node_num]) - torch.eye(self.max_node_num)
-        self.mask.unsqueeze_(0)  
+        self.mask.unsqueeze_(0)
 
     def forward(self, x, adj, flags):
-
+        # print('adj in: ', adj.shape)
         adjc = pow_tensor(adj, self.c_init)
 
         adj_list = [adjc]
@@ -137,14 +137,16 @@ class ScoreNetworkA(BaselineNetwork):
 
             x, adjc = self.layers[_](x, adjc, flags)
             adj_list.append(adjc)
-        
+
         adjs = torch.cat(adj_list, dim=1).permute(0,2,3,1)
         out_shape = adjs.shape[:-1] # B x N x N
         score = self.final(adjs).view(*out_shape)
-        
+
         self.mask = self.mask.to(score.device)
         score = score * self.mask
 
         score = mask_adjs(score, flags)
+
+        # print('adj score out: ', score.shape)
 
         return score

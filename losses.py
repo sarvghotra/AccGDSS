@@ -24,7 +24,7 @@ def get_score_fn(sde, model, train=True, continuous=True):
     def score_fn(x, adj, flags, t):
       if continuous:
         score = model_fn(x, adj, flags)
-      else:  
+      else:
         raise NotImplementedError(f"Discrete not supported")
       return score
 
@@ -34,9 +34,40 @@ def get_score_fn(sde, model, train=True, continuous=True):
   return score_fn
 
 
-def get_sde_loss_fn(sde_x, sde_adj, train=True, reduce_mean=False, continuous=True, 
+def get_score_fn_dpm_compt(sde, model, train=True, continuous=True):
+
+  if not train:
+    model.eval()
+  model_fn = model
+
+  if isinstance(sde, VPSDE) or isinstance(sde, subVPSDE):
+    def score_fn(x, adj, t, flags=None):
+      # Scale neural network output by standard deviation and flip sign
+      if continuous:
+        score = model_fn(x, adj, flags)
+        std = sde.marginal_prob(torch.zeros_like(adj), t)[1]
+      else:
+        raise NotImplementedError(f"Discrete not supported")
+      score = -score / std[:, None, None]
+      return score
+
+  elif isinstance(sde, VESDE):
+    def score_fn(x, adj, t, flags=None):
+      if continuous:
+        score = model_fn(x, adj, flags)
+      else:
+        raise NotImplementedError(f"Discrete not supported")
+      return score
+
+  else:
+    raise NotImplementedError(f"SDE class {sde.__class__.__name__} not supported.")
+
+  return score_fn
+
+
+def get_sde_loss_fn(sde_x, sde_adj, train=True, reduce_mean=False, continuous=True,
                     likelihood_weighting=False, eps=1e-5):
-  
+
   reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
   def loss_fn(model_x, model_adj, x, adj):
@@ -52,7 +83,7 @@ def get_sde_loss_fn(sde_x, sde_adj, train=True, reduce_mean=False, continuous=Tr
     perturbed_x = mean_x + std_x[:, None, None] * z_x
     perturbed_x = mask_x(perturbed_x, flags)
 
-    z_adj = gen_noise(adj, flags, sym=True) 
+    z_adj = gen_noise(adj, flags, sym=True)
     mean_adj, std_adj = sde_adj.marginal_prob(adj, t)
     perturbed_adj = mean_adj + std_adj[:, None, None] * z_adj
     perturbed_adj = mask_adjs(perturbed_adj, flags)
